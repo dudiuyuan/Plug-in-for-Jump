@@ -6,15 +6,22 @@ warnings.filterwarnings("ignore")
 import os
 import time
 import threading
+import auto
+import numpy as np
+import random
+import io
+
 
 coor=[]
 ax=None
 isAuto=False
 
+
 def get_screen_image():
     os.system('adb shell screencap -p /sdcard/screen.png')
     os.system('adb pull /sdcard/screen.png d:/Jump/screen.png')
     return numpy.array(PIL.Image.open("screen.png"))
+
 
 def on_click(event):
     if isAuto == False:
@@ -39,6 +46,7 @@ def on_click(event):
     else:
         print("Auto mode is enabled!")
 
+
 def jump_to_next(point1, point2):
     x1, y1 = point1
     x2, y2 = point2
@@ -46,23 +54,25 @@ def jump_to_next(point1, point2):
     os.system('adb shell input swipe 550 1550 550 1550 {}'.format(int(distance * 1.35)))
     print("Jump!")
 
+
 def update():
     time.sleep(0.8)
     print("Updating screen...")
     axes_image.set_array(get_screen_image())
     figure.canvas.draw()
-                    
+
+
 def button_click(event):
     if len(coor) < 2 and ax != None:
         coor.clear()
         ax.lines.clear()
         figure.canvas.draw()
 
+
 def auto_click(event):
     th = threading.Thread(target=auto_mode)
     th.start()
-import auto    
-import random
+
 
 def auto_mode():
     global isAuto
@@ -71,18 +81,23 @@ def auto_mode():
     print("Press Enter to start!")
     info = input()
     for i in range(int(info)):
-        auto.get_screenshot()
-        img =PIL.Image.open("autojump.png")
+        
+        try:
+            img_path = auto.get_screenshot()      # 只调用一次
+            img = PIL.Image.open(img_path)
+        except Exception as e:
+            print(f"[AUTO] Screenshot failed: {e}")
+            return
+
         piece_x, board_x = auto.find_piece_and_board(img)
-        press_point =(random.randint(*[815,923]), random.randint(*[1509, 1658]))
+        press_point = (random.randint(815, 923), random.randint(1509, 1658))
         auto.jump(piece_x, board_x, img, press_point)
         update()
         time.sleep(2)
-        if (i+1)==int(info):
+        if (i + 1) == int(info):
             isAuto = False
             print("Jump completed!")
-         
-   
+
 
 if __name__ == "__main__":
     figure = plt.figure()
@@ -95,10 +110,9 @@ if __name__ == "__main__":
     reelect_button.on_clicked(button_click)
 
     auto_button = Button(auto_button_position, label="", image=m1)
-    
+    auto_button.on_clicked(auto_click)
+    ax_img = plt.axes([0.05, 0.05, 0.7, 0.9])
     axes_image = plt.imshow(get_screen_image(),animated=True)
     figure.canvas.mpl_connect('button_press_event',on_click)
 
     plt.show()
-
-    
