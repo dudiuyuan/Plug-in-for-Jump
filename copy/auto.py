@@ -1,0 +1,337 @@
+import PIL, numpy
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
+import warnings
+warnings.filterwarnings("ignore")
+import os
+import subprocess
+import random
+import time
+import threading
+import os, subprocess, time, tempfile, shutil
+import os, subprocess, time, io, tempfile, shutil, glob
+from PIL import Image
+# ADB_LOCK= threading.Lock()
+loop=False
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+IMG_PATH = os.path.join(BASE_DIR, "autojump.png")
+_screencap_lock = threading.Lock()
+# def get_screenshot():#1
+#     process = subprocess.Popen('adb shell screencap -p', 
+#                                shell =True,stdout=subprocess.PIPE)
+#     if  process != None:
+#         screenshot = process.stdout.read()
+#         binary_screenshot = screenshot.replace(b'\r\r\n', b'\n')
+#         with open('autojump.png', 'wb') as f:
+#             f.write(binary_screenshot)
+#             print("Save the screenshot and then put it in the same directory!")
+
+# def get_screenshot():#2
+#     base_dir = os.path.dirname(os.path.abspath(__file__))  # auto.py所在目录
+#     save_path = os.path.join(base_dir, "autojump.png")
+
+#     process = subprocess.Popen('adb shell screencap -p',
+#                                shell=True, stdout=subprocess.PIPE)
+#     screenshot = process.stdout.read()
+#     binary_screenshot = screenshot.replace(b'\r\r\n', b'\n')
+
+#     with open(save_path, 'wb') as f:
+#         f.write(binary_screenshot)
+#     print(f"Saved screenshot to: {save_path}")
+#     return save_path
+
+# def get_screenshot():#3
+#     """
+#     截图到 autojump.png 并返回其绝对路径。
+#     失败时抛出 RuntimeError，不返回 None。
+#     """
+#     # 尝试用管道方式直接拿 PNG 数据
+#     proc = subprocess.run(
+#         ["adb", "shell", "screencap", "-p"],
+#         stdout=subprocess.PIPE,
+#         stderr=subprocess.PIPE,
+#         shell=False
+#     )
+
+#     if proc.returncode == 0 and proc.stdout:
+#         data = proc.stdout.replace(b'\r\r\n', b'\n')  # 处理 CRLF
+#         with open(IMG_PATH, "wb") as f:
+#             f.write(data)
+#     else:
+#         # 兜底：保存到 /sdcard 再 pull 回来
+#         r1 = subprocess.run(["adb", "shell", "screencap", "-p", "/sdcard/autojump.png"],
+#                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#         if r1.returncode != 0:
+#             raise RuntimeError(f"screencap failed: {r1.stderr.decode(errors='ignore')}")
+#         r2 = subprocess.run(["adb", "pull", "/sdcard/autojump.png", IMG_PATH],
+#                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#         if r2.returncode != 0:
+#             raise RuntimeError(f"adb pull failed: {r2.stderr.decode(errors='ignore')}")
+
+#     # 基本校验（存在且不是空文件）
+#     if not os.path.exists(IMG_PATH) or os.path.getsize(IMG_PATH) < 1024:
+#         raise RuntimeError("autojump.png missing or too small — screenshot likely failed.")
+
+#     print(f"Saved screenshot: {IMG_PATH}")
+#     return IMG_PATH
+
+
+
+PNG_SIG = b'\x89PNG\r\n\x1a\n'
+# _last_cap = 0.0
+
+def _atomic_write(path: str, data: bytes):
+    fd, tmp = tempfile.mkstemp(dir=BASE_DIR, prefix="autojump_", suffix=".png")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    shutil.move(tmp, path)
+
+def _is_valid_png(data: bytes) -> bool:
+    return data.startswith(PNG_SIG) and len(data) > 1024
+
+def _atomic_save(path: str, data: bytes):
+    fd, tmp = tempfile.mkstemp(dir=BASE_DIR, prefix="autojump_", suffix=".png")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    shutil.move(tmp, path)
+
+# def get_screenshot(retries: int = 3, sleep_sec: float = 0.15, serial: str | None = None) -> str:
+#     """
+#     截图到 autojump.png 并返回其绝对路径；失败抛异常（不会返回 None）。
+#     可选 serial 指定设备：例如 '28946c44'。
+#     """
+#     base = ["adb"]
+#     if serial:
+#         base += ["-s", serial]
+
+#     last_err = ""
+
+#     for attempt in range(1, retries + 1):
+#         # A. 直接用 exec-out 拿字节流
+#         proc = subprocess.run(base + ["exec-out", "screencap", "-p"],
+#                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#         out, err = proc.stdout, proc.stderr
+#         if proc.returncode == 0 and out:
+#             data = out.replace(b'\r\r\n', b'\n')
+#             if _is_valid_png(data):
+#                 _atomic_write(IMG_PATH, data)
+#                 print(f"Saved screenshot: {IMG_PATH}")
+#                 return IMG_PATH
+#             else:
+#                 # 记录前 120 字节便于判断是不是错误文本
+#                 last_err = f"exec-out returned non-PNG, head={data[:120]!r}"
+
+#         # B. 兜底：落盘到 /sdcard 再 pull
+#         r1 = subprocess.run(base + ["shell", "screencap", "-p", "/sdcard/autojump.png"],
+#                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#         if r1.returncode == 0:
+#             r2 = subprocess.run(base + ["pull", "/sdcard/autojump.png", IMG_PATH],
+#                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#             if r2.returncode == 0 and os.path.exists(IMG_PATH):
+#                 with open(IMG_PATH, "rb") as f:
+#                     data = f.read()
+#                 if _is_valid_png(data):
+#                     print(f"Saved screenshot: {IMG_PATH}")
+#                     return IMG_PATH
+#                 else:
+#                     last_err = f"pulled file is non-PNG, head={data[:120]!r}"
+#             else:
+#                 last_err = f"adb pull failed: {r2.stderr.decode(errors='ignore')}"
+#         else:
+#             last_err = f"screencap to /sdcard failed: {r1.stderr.decode(errors='ignore')}"
+
+#         if attempt < retries:
+#             time.sleep(sleep_sec)
+
+#     raise RuntimeError(f"Failed to capture valid PNG. Detail: {last_err}")
+
+def get_screenshot(retries: int = 3, sleep_sec: float = 0.15, serial: str | None = None) -> str:
+    """
+    截图并返回一个**唯一文件路径**（每次不同），保证是有效 PNG；失败抛异常。
+    """
+    with _screencap_lock:  # 串行化
+        for attempt in range(1, retries + 1):
+            # 每次生成唯一文件名，避免边读边被覆盖
+            out_path = os.path.join(
+                BASE_DIR, f"autojump_{int(time.time()*1000)}.png"
+            )
+
+            base = ["adb"]
+            if serial:
+                base += ["-s", serial]
+
+            # A. 直接 exec-out 拿字节
+            proc = subprocess.run(base + ["exec-out", "screencap", "-p"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+            if proc.returncode == 0 and proc.stdout:
+                data = proc.stdout.replace(b'\r\r\n', b'\n')
+                if _is_valid_png(data):
+                    _atomic_write(out_path, data)
+                    print(f"Saved screenshot: {out_path}")
+                    return out_path
+
+            # B. 兜底：/sdcard 写入再 pull
+            r1 = subprocess.run(base + ["shell", "screencap", "-p", "/sdcard/autojump.png"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+            if r1.returncode == 0:
+                r2 = subprocess.run(base + ["pull", "/sdcard/autojump.png", out_path],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+                if r2.returncode == 0 and os.path.exists(out_path):
+                    with open(out_path, "rb") as f:
+                        data = f.read()
+                    if _is_valid_png(data):
+                        print(f"Saved screenshot: {out_path}")
+                        return out_path
+
+            if attempt < retries:
+                time.sleep(sleep_sec)
+
+        raise RuntimeError("Failed to capture valid PNG via ADB after retries.")
+
+# def get_screenshot_image(retries: int = 3, min_interval_sec: float = 0.6,
+#                          serial: str | None = None,
+#                          save_debug_every: int | None = None,
+#                          _counter: list[int] = [0]):
+#     """
+#     直接返回一张 PIL.Image (RGB, 已在内存)，不落盘。
+#     - min_interval_sec: 距上次截图的最小间隔（防抖）
+#     - save_debug_every: 若设为 N，则每 N 次保存一张 png 供排查
+#     """
+#     with ADB_LOCK:  # 串行化
+#         global _last_cap
+#         now = time.time()
+#         if now - _last_cap < min_interval_sec:
+#             time.sleep(min_interval_sec - (now - _last_cap))
+#         _last_cap = time.time()
+
+#         base = ["adb"]
+#         if serial:
+#             base += ["-s", serial]
+
+#         last_err = ""
+#         for _ in range(retries):
+#             # 方案 A：exec-out 直接取字节
+#             p = subprocess.run(base + ["exec-out", "screencap", "-p"],
+#                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#             if p.returncode == 0 and p.stdout:
+#                 data = p.stdout.replace(b"\r\r\n", b"\n")
+#                 if _is_valid_png(data):
+#                     # 可选：定期保存调试图
+#                     _counter[0] += 1
+#                     if save_debug_every and _counter[0] % save_debug_every == 0:
+#                         dbg_path = os.path.join(BASE_DIR, f"autojump_{int(time.time()*1000)}.png")
+#                         _atomic_save(dbg_path, data)
+#                         print(f"Saved screenshot: {dbg_path}")
+
+#                     with Image.open(io.BytesIO(data)) as im:
+#                         return im.convert("RGB").copy()
+
+#                 last_err = f"exec-out non-PNG head={data[:80]!r}"
+
+#             # 方案 B：兜底（/sdcard + pull，再内存打开）
+#             r1 = subprocess.run(base + ["shell", "screencap", "-p", "/sdcard/autojump.png"],
+#                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#             if r1.returncode == 0:
+#                 r2 = subprocess.run(base + ["exec-out", "cat", "/sdcard/autojump.png"],
+#                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+#                 if r2.returncode == 0 and r2.stdout:
+#                     data = r2.stdout.replace(b"\r\r\n", b"\n")
+#                     if _is_valid_png(data):
+#                         _counter[0] += 1
+#                         if save_debug_every and _counter[0] % save_debug_every == 0:
+#                             dbg_path = os.path.join(BASE_DIR, f"autojump_{int(time.time()*1000)}.png")
+#                             _atomic_save(dbg_path, data)
+#                             print(f"Saved screenshot: {dbg_path}")
+
+#                         with Image.open(io.BytesIO(data)) as im:
+#                             return im.convert("RGB").copy()
+#                     last_err = f"pull non-PNG head={data[:80]!r}"
+#             time.sleep(0.1)
+
+#         raise RuntimeError(f"Failed to capture PNG via ADB. Detail: {last_err}")
+
+# def cleanup_debug_images(keep: int = 10):
+#     """只保留最新 keep 张 autojump_*.png，其余删除。"""
+#     files = sorted(glob.glob(os.path.join(BASE_DIR, "autojump_*.png")))
+#     for p in files[:-keep]:
+#         try:
+#             os.remove(p)
+#         except Exception:
+#             pass
+def find_piece_and_board(img):
+    w, h= img.size
+    piece_y_max = 0
+    scan_x_side=int(w/8)
+    scan_start_y=0
+    img_pixel =img.load()
+    if not loop:
+        if sum(img_pixel[5,5][:-1])<150:
+            stop()
+    for i in range(int(h/3),int(h*2/3),50):
+        first_pixel = img_pixel[0, i]
+        for j in range(1,w):
+            pixel = img_pixel[j, i]
+            if pixel[0] != first_pixel[0] or pixel[1] != first_pixel[1] or pixel[2] != first_pixel[2]:
+                scan_start_y =i-50
+                break
+        if scan_start_y:
+            break    
+    left=0
+    right=0
+    for i in range (scan_start_y, int(h*2/3)):
+        flag =True
+        for j in range (scan_x_side, w-scan_x_side):
+            pixel = img_pixel[j, i]
+            if (50 < pixel[0] < 60 )and(53<pixel[1]<63) and (95<pixel[2]<110):
+                if flag:
+                    left = j
+                    flag = False
+                right = j
+                piece_y_max=max(i,piece_y_max)
+    if not all((left, right)):
+        return 0,0,0,0
+    piece_x = (left + right) // 2
+    board_x=0
+    if piece_x < w / 2:
+        board_x_start, board_x_end = w//2,w
+    else:
+        board_x_start, board_x_end = 0, w//2
+
+    board_x_set=[]
+    for by in range((h-w)//2,(h+w)//2,4):
+        bg_pixel= img_pixel[0, by]
+        for bx in range(board_x_start, board_x_end):
+            pixel = img_pixel[bx, by]
+            if (abs(pixel[0] - bg_pixel[0])+
+                    abs(pixel[1] - bg_pixel[1])+
+                    abs(pixel[2] - bg_pixel[2]) > 10):
+                board_x_set.append(bx)
+                
+
+        if len(board_x_set) > 10:
+            board_x = sum(board_x_set) / len(board_x_set)
+            break
+    print("Read the image and obtain the horizontal center coordinates of the chess pieces and board positions")
+    return piece_x, board_x
+
+def jump(piece_x, board_x,im,point):
+    distanceX=abs(board_x - piece_x)
+    shortEdge=min(im.size)
+    jumpPercent=distanceX/shortEdge
+    jumpFullWidth=1700
+    press_time = round(jumpFullWidth * jumpPercent)
+    press_time = 0 if not press_time else max(press_time, 200)
+    cmd = 'adb shell input swipe {x1} {y1} {x2} {y2} {duration}'.format(
+        x1=point[0], 
+        y1=point[1],
+        x2=point[0]+random.randint(0,3),
+        y2=point[1]+random.randint(0,3),
+        duration=press_time
+    )
+    os.system(cmd)
+    print("Generate a compression command,jump!")
+def stop():
+    exit("Stop!")
+  
+
+        
